@@ -1,0 +1,20 @@
+#!/bin/bash
+
+TARG=`readlink -f $1`
+MAIN=$2
+SRC=`readlink -f $3`
+PRI=$4
+
+if [ -z "$PRI" ]; then PRI=50; fi
+
+cmd=""
+for f in "$SRC/"*; do
+    bn=`basename $f`
+    if [ "$bn" == "$MAIN" ]; then continue; fi
+    cmd="$cmd --slave $TARG/$bn $bn $f"
+done
+
+cmd="update-alternatives --install $TARG/$MAIN $MAIN $SRC/$MAIN $PRI $cmd"
+
+sudo $cmd
+

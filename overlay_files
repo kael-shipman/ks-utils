@@ -1,0 +1,130 @@
+#!/usr/local/bin/php
+
+<?php
+
+function dump_usage() {
+  echo "overlay: recurse through a program's directory tree and symlink each file to the analogous location in the target tree.\n\n";
+  echo "Usage:\n\n";
+  echo "overlay install|uninstall --target=/path/to/target/dir [--source=/path/to/source] [-o | --overwrite] [-h | --include-hidden] [-d | --dry-run]\n";
+  echo "\n";
+  echo "'target' is equivalent to --prefix in a standard configure script. This will usually be /usr or /usr/local.\n";
+  echo "'source' is optional, and specifies that the source is something other than the current working directory.\n";
+  echo "If 'overwrite' is specified, any files that already exist in target will be overwritten. This could be dangerous for shared libraries!\n";
+  echo "If 'include-hidden' is specified, dotfiles will be linked (but not special . and .. directories).\n";
+  echo "\n";
+}
+
+$include_hidden = false;
+$overwrite = false;
+$dryrun = false;
+foreach ($argv as $n => $arg) {
+  if ($n == 0) continue;
+
+  if ($arg == 'install') $action = 'install';
+  elseif ($arg == 'uninstall') $action = 'uninstall';
+  elseif (strpos($arg, '--target=') !== false) $target = substr($arg, 9);
+  elseif (strpos($arg, '--source=') !== false) $source = substr($arg, 9);
+  elseif ($arg == '-o' || $arg == '--overwrite') $overwrite = true;
+  elseif ($arg == '-h' || $arg == '--include-hidden') $include_hidden = true;
+  elseif ($arg == '-d' || $arg == '--dry-run') $dryrun = true;
+  else {
+    echo "Invalid option: $arg\n";
+    dump_usage();
+    exit(1);
+  }
+}
+
+if (!isset($action)) {
+  echo "Must supply action argument!\n\n";
+  dump_usage();
+  die();
+}
+if (!isset($source)) $source = getcwd();
+
+if (!file_exists($source)) {
+  echo "Source directory doesn't exist!\n\n";
+  dump_usage();
+  exit(1);
+}
+
+if (!file_exists($target)) {
+  echo "\nTarget directory doesn't exist!\n";
+  dump_usage();
+  exit(1);
+}
+
+
+function recursively_link_files($src, $targ, $dryrun=false) {
+  if (!file_exists($targ)) {
+    if ($dryrun) echo "WOULD create directory $targ\n";
+    else mkdir($targ);
+  }
+  $src_dir = dir($src);
+  while ($file = $src_dir->read()) {
+    if ($file == '.' || $file == '..' || (!$GLOBALS['include_hidden'] && substr($file,0,1) == '.')) continue;
+
+    $src_file = "$src/$file";
+    $targ_file = "$targ/$file";
+    if (is_dir($src_file)) recursively_link_files($src_file, $targ_file, $dryrun);
+    else {
+      $link = true;
+      if (file_exists($targ_file) && !$GLOBALS['overwrite']) {
+        echo "Overwrite $targ_file with $src_file? [y,N]: ";
+        $answer = fgets(STDIN);
+        if (trim(strtolower($answer)) != 'y') $link = false;
+      }
+
+      if ($link) {
+        if ($dryrun) {
+          echo "WOULD link $src_file to $targ_file\n";
+        } else {
+          echo "Linking $src_file to $targ_file\n";
+          $link = exec("ln -fs --target-directory=\"$targ\" \"$src_file\"");
+          if (!$link) "Error linking file: $targ_file to $src_file\n";
+        }
+      }
+    }
+  }
+}
+
+function recursively_unlink_files($src, $targ, $dryrun=false) {
+  if (!file_exists($targ)) return;
+  $src_dir = dir($src);
+  $file_count = 0;
+  while($file = $src_dir->read()) {
+    if ($file == '.' || $file == '..' || (!$GLOBALS['include_hidden'] && substr($file,0,1) == '.')) continue;
+
+    $file_count++;
+    $src_file = "$src/$file";
+    $targ_file = "$targ/$file";
+    if (is_dir($src_file)) recursively_unlink_files($src_file, $targ_file, $dryrun);
+    elseif (file_exists($targ_file)) {
+      if ($dryrun) echo "WOULD remove $targ_file\n";
+      else {
+        echo "Removing $targ_file\n";
+        unlink($targ_file);
+      }
+    } else {
+      echo "File $targ_file already gone\n";
+    }
+  }
+
+  $targ_dir = dir($targ);
+  $remaining_count = 0;
+  while($file = $targ_dir->read()) {
+    if ($file == '.' || $file == '..') continue;
+    $remaining_count++;
+  }
+  $targ_dir->close();
+  $src_dir->close();
+  if ($remaining_count == 0) {
+    rmdir($targ);
+  } elseif ($dryrun && $remaining_count == $file_count) {
+    echo "WOULD remove directory $targ\n";
+  }
+}
+
+if ($action == 'install') recursively_link_files($source,$target,$dryrun);
+elseif ($action == 'uninstall') recursively_unlink_files($source, $target,$dryrun);
+
+?>
