@@ -1,0 +1,8 @@
+Package: ks-utils
+Version: ::VERSION::
+Section: free
+Priority: optional
+Architecture: all
+Installed-Size: 0
+Maintainer: Kael Shipman <kael.shipman@gmail.com>
+Description: A collection of utilities that I use to manage myself

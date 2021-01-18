@@ -1,0 +1,59 @@
+#!/bin/sh
+
+MODE=
+P_SPECIFIER=left
+L_SPECIFIER=bottom
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    portrait|landscape)
+      if [ -z "$MODE" ]; then
+        MODE="$1"
+        shift
+      else
+        >&2 echo "E: Mode already set to '$MODE'. Can't pass mode twice.'"
+        exit 1
+      fi
+    ;;
+    top|bottom)
+      if ! [ "$MODE" = "landscape" ]; then
+        >&2 echo "E: Mode must be landscape in order to use 'top' or 'bottom' specifiers"
+        exit 4
+      else
+        L_SPECIFIER="$1"
+        shift
+      fi
+    ;;
+    left|right)
+      if ! [ "$MODE" = "portrait" ]; then
+        >&2 echo "E: Mode must be portrait in order to use 'left' or 'right' specifiers"
+        exit 5
+      else
+        P_SPECIFIER="$1"
+        shift
+      fi
+    ;;
+    *)
+      >&2 echo "E: Unknown option '$1'"
+      exit 2
+    ;;
+  esac
+done
+
+if [ -z "$MODE" ]; then
+  >&2 echo "E: No mode provided. Mode should be either 'portrait' or 'landscape'"
+  exit 3
+fi
+
+if [ "$MODE" = "portrait" ]; then
+  rotation="$P_SPECIFIER"
+  coords="0 -1 1 1 0 0 0 0 1"
+else
+  rotation="$([ "$L_SPECIFIER" = "bottom" ] && echo "normal" || echo "inverted")"
+  coords="0 0 0 0 0 0 0 0 0"
+fi
+
+xrandr -o "$rotation"
+xinput set-prop "Wacom Pen and multitouch sensor Finger touch" --type=float "Coordinate Transformation Matrix" $coords
+xinput set-prop "Wacom Pen and multitouch sensor Pen stylus" --type=float "Coordinate Transformation Matrix" $coords
+xinput set-prop "Wacom Pen and multitouch sensor Pen eraser" --type=float "Coordinate Transformation Matrix" $coords
+

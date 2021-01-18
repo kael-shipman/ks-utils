@@ -2,6 +2,7 @@
 
 sub=0
 current=`pwd`
+executable="$(readlink -f "$0")"
 
 while test $# -gt 0; do
   case $1 in
@@ -43,7 +44,15 @@ ds=`echo $current/*/`
 if [ "$ds" != "$current/"'*/' ]; then
 
     for d in $ds; do
-      cd "$d"
+      # Don't descend into 3rd-party vendor folders
+      if [ "$(basename "$d")" == 'vendor' ]; then
+          continue
+      fi
+
+      if ! cd "$d"; then
+          >&2 echo "E: Couldn't descend into directory '$d'. Skipping."
+          continue
+      fi
 
       repo="$d"
 
@@ -89,7 +98,7 @@ if [ "$ds" != "$current/"'*/' ]; then
 
       fi
 
-      git-batch.sh -s
+      "$executable" -s
       if [ "$?" -gt 0 ]; then changes=1; fi
 
       cd ../

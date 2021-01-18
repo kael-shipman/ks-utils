@@ -1,0 +1,166 @@
+#!/bin/bash
+
+if [ -z "$KS_PLUGIN_PATH" ]; then KS_PLUGIN_PATH=/usr/bin; fi
+
+NATIVE_COMMANDS="list-commands"
+KS_VERSION="::VERSION::"
+
+
+##
+# Make bold available for output
+##
+if command -v tput &>/dev/null; then
+    export bold="$(tput bold)"
+    export normal="$(tput sgr0)"
+else
+    export bold=""
+    export normal=""
+fi
+
+##
+# List all available commands, including plugins.
+#
+# Outputs available commands, including any commands found in the plugin path starting with `ks-`.
+#
+# @flag -r|--raw Whether to return a raw list or a human-formatted list of commands
+# @echo string The \n-separated list of commands
+##
+function list_commands() {
+    local RAW=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -r|--raw)
+                RAW=1
+                shift
+            ;;
+
+            *)
+                >&2 echo "ks: list-commands: E: Invalid arguments passed: $2"
+                >&2 echo
+                return 10
+            ;;
+        esac
+    done
+
+    local cmds=()
+
+    # First list native commands
+    while read -u8 -r -d "|" c || [ -n "$c" ]; do
+        cmds+=("$c")
+    done 8< <(echo "$NATIVE_COMMANDS")
+
+    # Then list plugins
+    while read -u8 -r -d $'\n' c || [ -n "$c" ]; do
+        if ! [ -e "$c" ]; then
+            continue
+        fi
+        cmds+=("$(basename "$c" | sed 's/^ks-//')")
+    done 8< <(ls -1 "$KS_PLUGIN_PATH/ks-"* 2>/dev/null)
+
+    if [ "${#cmds[@]}" -eq 0 ]; then
+        if [ $RAW -eq 0 ]; then
+            echo "No ks commands installed at $KS_PLUGIN_PATH. See help for instructions on"
+            echo "installing commands."
+        fi
+    else
+        if [ $RAW -eq 0 ]; then
+            echo "Available commands:"
+            echo
+        fi
+
+        while read -u8 -r -d $'\n' c || [ -n "$c" ]; do
+            if [ $RAW -eq 0 ]; then
+                echo -n "    "
+            fi
+            echo "$c"
+        done 8< <(IFS=$'\n'; echo "${cmds[*]}" | sort)
+
+        if [ $RAW -eq 0 ]; then
+            echo
+        fi
+    fi
+}
+
+
+
+
+
+
+CMD=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      man ks
+      exit
+    ;;
+
+    -v|--version)
+      echo "ks - A basic, gnu-based CLI for accessing my various bespoke scripts"
+      echo "$KS_VERSION"
+      exit
+    ;;
+
+    *)
+      CMD="$1"
+      shift
+      break 2
+    ;;
+  esac
+done
+
+
+
+
+
+
+
+
+##############################################################
+# Validate                                                   #
+##############################################################
+
+if [ -z "$CMD" ]; then
+    >&2 echo "ks: E: You must pass a valid ks cli command."
+    >&2 echo "        See \`man ks\` for more details."
+    >&2 echo
+    exit 1
+fi
+
+if ! list_commands -r | grep -Fxq "$CMD"; then
+    >&2 echo "ks: E: Invalid command passed: $CMD"
+    >&2 list_commands
+    exit 53
+fi
+
+
+
+
+
+
+
+
+##############################################################
+# Execute                                                    #
+##############################################################
+
+export _KS_CONTEXT=1
+
+# Native commands
+if echo "$CMD" | grep -Exq "$NATIVE_COMMANDS"; then
+    "$(echo "$CMD" | sed 's/-/_/g')" "$@"
+
+# Plugins
+else
+    if ! command -v "$KS_PLUGIN_PATH/ks-${CMD}" &>/dev/null ; then
+        >&2 echo "ks: E: The command you've passed ($CMD) does not appear to be"
+        >&2 echo "        a valid ks command. If this is a plugin, please"
+        >&2 echo "        make sure you link it into your ks path"
+        >&2 echo "        ($KS_PLUGIN_PATH) and prefix it with \`ks-\`. See \`man ks\`"
+        >&2 echo "        for more details."
+        >&2 echo
+        exit
+    fi
+
+    "$KS_PLUGIN_PATH/ks-${CMD}" "$@"
+fi
+
