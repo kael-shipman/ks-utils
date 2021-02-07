@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ -z "$KS_PLUGIN_PATH" ]; then KS_PLUGIN_PATH=/usr/bin; fi
+if [ -z "$KS_PLUGIN_PATH" ]; then KS_PLUGIN_PATH=/usr/local/bin; fi
 
 NATIVE_COMMANDS="list-commands"
 KS_VERSION="::VERSION::"

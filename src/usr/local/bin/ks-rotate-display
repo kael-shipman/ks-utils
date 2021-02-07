@@ -1,10 +1,14 @@
 #!/bin/sh
 
+# Reference https://askubuntu.com/a/405840/527080 for information about this
+
 MODE=
 P_SPECIFIER=left
 L_SPECIFIER=bottom
+VERBOSE=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --verbose) VERBOSE=1; shift;;
     portrait|landscape)
       if [ -z "$MODE" ]; then
         MODE="$1"
@@ -52,8 +56,19 @@ else
   coords="0 0 0 0 0 0 0 0 0"
 fi
 
+# Get devices to adjust
+DEVICES="$(xinput -list | grep -i wacom | sed -r 's/^.*(wacom[^\t]+).*$/\1/i')"
+if [ "$(echo -n "$DEVICES" | wc -l)" -eq 0 ]; then
+    >&2 echo "No Wacom devices found on this machine. Don't know what to do. Exiting."
+    exit 1
+elif [ "$VERBOSE" -eq 1 ]; then
+    >&2 echo "Found $(echo "$DEVICES" | wc -l) Wacom devices"
+fi
+
+[ "$VERBOSE" -eq 1 ] && >&2 echo "Rotating display to $rotation"
 xrandr -o "$rotation"
-xinput set-prop "Wacom Pen and multitouch sensor Finger touch" --type=float "Coordinate Transformation Matrix" $coords
-xinput set-prop "Wacom Pen and multitouch sensor Pen stylus" --type=float "Coordinate Transformation Matrix" $coords
-xinput set-prop "Wacom Pen and multitouch sensor Pen eraser" --type=float "Coordinate Transformation Matrix" $coords
+echo "$DEVICES" | while read D; do
+    >&2 echo "Resetting coordinates for device '$D'"
+    xinput set-prop "$D" --type=float "Coordinate Transformation Matrix" $coords
+done
 
