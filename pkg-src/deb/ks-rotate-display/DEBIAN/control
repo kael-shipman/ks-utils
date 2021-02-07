@@ -1,0 +1,13 @@
+Package: ks-rotate-display
+Version: ::VERSION::
+Section: free
+Priority: optional
+Depends: iio-sensor-proxy
+Architecture: all
+Installed-Size: 0
+Maintainer: Kael Shipman <kael.shipman@gmail.com>
+Description: A script for automatically rotating my display and digitizer when the screen physically rotates.
+ This script can be used as a plugin to the `ks` suite (my personal script runner), but can also
+ be used as a stand-alone.
+ .
+ It includes a systemd file to enable the service at startup.

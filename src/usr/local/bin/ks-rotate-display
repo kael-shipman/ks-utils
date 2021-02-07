@@ -1,39 +1,35 @@
 #!/bin/sh
 
-# Reference https://askubuntu.com/a/405840/527080 for information about this
+# This script facilitates both the actual rotation of the display and digitizer as well as
+# optionally enabling a daemon to monitor for orientation changes and respond accordingly.
+#
+# References:
+#
+# * https://askubuntu.com/a/405840/527080
+# * https://linuxappfinder.com/blog/auto_screen_rotation_in_ubuntu
+# * https://wiki.ubuntu.com/X/InputCoordinateTransformation
 
-MODE=
-P_SPECIFIER=left
-L_SPECIFIER=bottom
-VERBOSE=0
+
+DIGITIZER_GREP="$([ -n "$DIGITIZER_GREP" ] && echo "$DIGITIZER_GREP" || echo "wacom")"
+ORIENTATION=
+VERBOSE="$([ -n "$VERBOSE" ] && echo "$VERBOSE" || echo "0")"
+VERSION=::VERSION::
+WATCH=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --verbose) VERBOSE=1; shift;;
-    portrait|landscape)
-      if [ -z "$MODE" ]; then
-        MODE="$1"
+    --watch) WATCH=1; shift;;
+    --version) echo "ks-rotate-display v$VERSION"; exit;;
+    -h|--help) man ks-rotate-display; exit;;
+    -d|--digitizer) DIGITIZER_GREP="$2"; shift 2;;
+
+    normal|left-up|bottom-up|right-up)
+      if [ -z "$ORIENTATION" ]; then
+        ORIENTATION="$1"
         shift
       else
-        >&2 echo "E: Mode already set to '$MODE'. Can't pass mode twice.'"
+        >&2 echo "E: Orientation already set to '$ORIENTATION'. Can't pass orientation twice.'"
         exit 1
-      fi
-    ;;
-    top|bottom)
-      if ! [ "$MODE" = "landscape" ]; then
-        >&2 echo "E: Mode must be landscape in order to use 'top' or 'bottom' specifiers"
-        exit 4
-      else
-        L_SPECIFIER="$1"
-        shift
-      fi
-    ;;
-    left|right)
-      if ! [ "$MODE" = "portrait" ]; then
-        >&2 echo "E: Mode must be portrait in order to use 'left' or 'right' specifiers"
-        exit 5
-      else
-        P_SPECIFIER="$1"
-        shift
       fi
     ;;
     *)
@@ -43,32 +39,88 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ -z "$MODE" ]; then
-  >&2 echo "E: No mode provided. Mode should be either 'portrait' or 'landscape'"
+
+# If we're in watch mode, just set it up and daemonize
+if [ "$WATCH" -eq 1 ]; then
+    export VERBOSE
+    LAST_PID=
+    monitor-sensor | while read val; do
+        if echo "$val" | grep -q 'orientation changed'; then
+            if [ -n "$LAST_PID" ] && ps -p"$LAST_PID" | grep -q "$LAST_PID"; then
+                kill "$LAST_PID"
+            fi
+            export val
+            bash -c '
+                [ "$VERBOSE" -eq 1 ] && >&2 echo "ORIENTATION CHANGED: $val"
+                perl -e "select(undef,undef,undef,0.7);"
+                [ "$VERBOSE" -eq 1 ] && >&2 echo "Activating"
+                ORIENTATION="$(echo "$val" | sed -r "s/^.*: (.*)\$/\1/g")"
+                [ "$VERBOSE" -eq 1 ] && >&2 echo "Changing orientation to $ORIENTATION"
+                ks rotate-display "$ORIENTATION"
+            ' &
+            LAST_PID=$!
+        fi
+    done
+    exit
+fi
+
+if [ -z "$ORIENTATION" ]; then
+  >&2 echo "E: No orientation provided. Orientation should be one of the following options:"
+  >&2 echo
+  >&2 echo "  * normal - Normal display"
+  >&2 echo "  * left-up - The normal left side of the screen is now the top"
+  >&2 echo "  * right-up - The normal right side of the screen is now the top"
+  >&2 echo "  * bottom-up - The normal bottom of the screen is now the top"
+  >&2 echo
   exit 3
 fi
 
-if [ "$MODE" = "portrait" ]; then
-  rotation="$P_SPECIFIER"
-  coords="0 -1 1 1 0 0 0 0 1"
-else
-  rotation="$([ "$L_SPECIFIER" = "bottom" ] && echo "normal" || echo "inverted")"
-  coords="0 0 0 0 0 0 0 0 0"
+if [ "$ORIENTATION" = "left-up" ]; then
+  ROTATION="left"
+  COORDS="0 -1 1 1 0 0 0 0 1"
+elif [ "$ORIENTATION" = "right-up" ]; then
+  ROTATION="right"
+  COORDS="0 1 0 -1 0 1 0 0 1"
+elif [ "$ORIENTATION" = "bottom-up" ]; then
+  ROTATION="inverted"
+  COORDS="-1 0 1 0 -1 1 0 0 1"
+elif [ "$ORIENTATION" = "normal" ]; then
+  ROTATION="normal"
+  COORDS="0 0 0 0 0 0 0 0 0"
 fi
 
-# Get devices to adjust
-DEVICES="$(xinput -list | grep -i wacom | sed -r 's/^.*(wacom[^\t]+).*$/\1/i')"
+# Rotate display
+[ "$VERBOSE" -eq 1 ] && >&2 echo "Rotating display to $ROTATION"
+xrandr -o "$ROTATION"
+
+# Now try to rotate digitizers, if present
+DEVICES="$(xinput -list | grep -Ei "$DIGITIZER_GREP" | sed -r 's/^.*↳ ([^\t]+).*$/\1/')"
 if [ "$(echo -n "$DEVICES" | wc -l)" -eq 0 ]; then
-    >&2 echo "No Wacom devices found on this machine. Don't know what to do. Exiting."
-    exit 1
+    >&2 echo "No digitizer devices found on this machine. Not rotating digitizers. Exiting."
+    exit
 elif [ "$VERBOSE" -eq 1 ]; then
     >&2 echo "Found $(echo "$DEVICES" | wc -l) Wacom devices"
 fi
 
-[ "$VERBOSE" -eq 1 ] && >&2 echo "Rotating display to $rotation"
-xrandr -o "$rotation"
 echo "$DEVICES" | while read D; do
-    >&2 echo "Resetting coordinates for device '$D'"
-    xinput set-prop "$D" --type=float "Coordinate Transformation Matrix" $coords
+    [ "$VERBOSE" -eq 1 ] && >&2 echo "Resetting coordinates for device '$D'"
+    xinput set-prop "$D" --type=float "Coordinate Transformation Matrix" $COORDS
 done
 
+# Activate hook
+POST_HOOK_PATH="$KS_PLUGIN_PATH/ks-rotate-display-post-rotate"
+[ "$VERBOSE" -eq 1 ] && >&2 echo "Searching for hook at $POST_HOOK_PATH"
+if [ -e "$POST_HOOK_PATH" ]; then
+    if [ -x "$POST_HOOK_PATH" ]; then
+        [ "$VERBOSE" -eq 1 ] && \
+            >&2 echo "Exporting DEVICES DIGITIZER_GREP ORIENTATION ROTATION COORDS variables and"\
+                "executing $POST_HOOK_PATH"
+        export DEVICES DIGITIZER_GREP ORIENTATION ROTATION COORDS
+        "$POST_HOOK_PATH"
+    else
+        >&2 echo "W: Post rotate script exists at $POST_HOOK_PATH, but it is not executable. This"\
+            "seems to be a mistake."
+    fi
+else
+    [ "$VERBOSE" -eq 1 ] && >&2 echo "No post-rotate hook found"
+fi
