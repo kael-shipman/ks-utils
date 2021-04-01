@@ -3,10 +3,10 @@ Description=Monitor sensors for screen rotation events and rotate display and di
 Documentation=man:ks-rotate-display(1)
 
 [Service]
-ExecStart=/usr/local/bin/ks rotate-display --watch
+ExecStart=/usr/local/bin/ks rotate-display watch
 Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 

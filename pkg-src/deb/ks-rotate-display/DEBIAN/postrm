@@ -1,0 +1,5 @@
+#!/bin/sh
+
+if [ "$1" = "purge" ]; then
+    rm /home/*/.config/systemd/user/ks-rotate-display.service
+fi

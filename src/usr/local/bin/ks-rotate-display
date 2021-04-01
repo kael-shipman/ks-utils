@@ -14,15 +14,19 @@ DIGITIZER_GREP="$([ -n "$DIGITIZER_GREP" ] && echo "$DIGITIZER_GREP" || echo "wa
 ORIENTATION=
 VERBOSE="$([ -n "$VERBOSE" ] && echo "$VERBOSE" || echo "0")"
 VERSION=::VERSION::
+ENABLE_DISABLE=
 WATCH=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    # Options
     --verbose) VERBOSE=1; shift;;
-    --watch) WATCH=1; shift;;
     --version) echo "ks-rotate-display v$VERSION"; exit;;
     -h|--help) man ks-rotate-display; exit;;
     -d|--digitizer) DIGITIZER_GREP="$2"; shift 2;;
 
+    # Commands
+    watch) WATCH=1; shift; break;;
+    enable|disable) ENABLE_DISABLE="$1"; shift; break;;
     normal|left-up|bottom-up|right-up)
       if [ -z "$ORIENTATION" ]; then
         ORIENTATION="$1"
@@ -39,6 +43,25 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# If we're enabling/disabling, do that
+if [ -n "$ENABLE_DISABLE" ]; then
+    if [ -n "$SUDO_USER" ]; then
+        >&2 echo "It appears as though you've run this command using sudo. This will not work, since this is a user-level service. Please run the command without sudo instead."
+        exit 3
+    fi
+
+    userdir="$HOME/.config/systemd/user"
+
+    if [ "$ENABLE_DISABLE" = "enable" ]; then
+        mkdir -p "$userdir"
+        cp /usr/share/ks-rotate-display/ks-rotate-display.service "$userdir/"
+        systemctl --user enable --now ks-rotate-display
+    else
+        systemctl --user disable --now ks-rotate-display || true
+    fi
+
+    exit
+fi
 
 # If we're in watch mode, just set it up and daemonize
 if [ "$WATCH" -eq 1 ]; then
@@ -75,6 +98,21 @@ if [ -z "$ORIENTATION" ]; then
   exit 3
 fi
 
+# If the built-in display is not connected, just exit
+[ -z "$BUILTIN_REGEXP" ] && BUILTIN_REGEXP="^eDP-1"
+[ "$VERBOSE" -eq 1 ] && >&2 echo "Using regexp '$BUILTIN_REGEXP' to find built-in display"
+if ! xrandr | grep -E "$BUILTIN_REGEXP" | grep -q " connected "; then
+    >&2 echo "Laptop display (identified by regexp '$BUILTIN_REGEXP') not connected. Exiting."
+    exit
+fi
+
+[ -z "$BUILTIN_NAME" ] && BUILTIN_NAME="$(xrandr | grep -E "$BUILTIN_REGEXP" | grep " connected " | sed -r 's/^([^ ]+).*$/\1/')"
+[ "$VERBOSE" -eq 1 ] && >&2 echo "Found built-in display with ID '$BUILTIN_NAME'"
+if [ -z "$BUILTIN_NAME" ]; then
+    >&2 echo "It appears as though the laptop display could not be properly identified. This is an unlikely error. Exiting."
+    exit 1
+fi
+
 if [ "$ORIENTATION" = "left-up" ]; then
   ROTATION="left"
   COORDS="0 -1 1 1 0 0 0 0 1"
@@ -90,8 +128,8 @@ elif [ "$ORIENTATION" = "normal" ]; then
 fi
 
 # Rotate display
-[ "$VERBOSE" -eq 1 ] && >&2 echo "Rotating display to $ROTATION"
-xrandr -o "$ROTATION"
+[ "$VERBOSE" -eq 1 ] && >&2 echo "Rotating display '$BUILTIN_NAME' to $ROTATION"
+xrandr --output "$BUILTIN_NAME" --rotate "$ROTATION"
 
 # Now try to rotate digitizers, if present
 DEVICES="$(xinput -list | grep -Ei "$DIGITIZER_GREP" | sed -r 's/^.*↳ ([^\t]+).*$/\1/')"
