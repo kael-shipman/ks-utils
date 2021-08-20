@@ -1,0 +1,130 @@
+#!/usr/bin/env node
+
+const fs = require("fs");
+
+let input = null;
+let startDate = null;
+let dateColumn = 0;
+let amountColumn = 3;
+
+const help = () => {
+  console.log(`Process Banking CSV`);
+  console.log();
+  console.log(`${process.argv[1]} -h|--help`);
+  console.log(`${process.argv[1]} [-d|--date-column] [-a|--amount-column] [-s|--start-date] input-file.csv`);
+  console.log();
+  console.log(`Parse the input file and split a signed amount column into debit and credit columns, optionally truncating by start date. Output is written to stdout and can be redirected accordingly.`);
+  console.log();
+  console.log(`Options:`);
+  console.log();
+  console.log (`  -d|--date-column     Zero-indexed integer indicating which column contains the transaction date. Default: 0`);
+  console.log (`  -a|--amount-column   Zero-indexed integer indicating which column contains the transaction amount. Default: 3`);
+  console.log (`  -s|--start-date      A date before which records will be discarded from the output file. (Must be parsable by javascript Date().) Default: null`);
+  console.log();
+}
+
+const argv = Array.from(process.argv).slice(2);
+while (argv.length > 0) {
+  const arg = argv.shift();
+  if (arg.match(/^(-d)|(--date-column)$/)) {
+    dateColumn = Number(argv.shift());
+  } else if (arg.match(/^(-a)|(--amount-column)$/)) {
+    amountColumn = Number(argv.shift());
+  } else if (arg.match(/^(-s)|(--start-date)$/)) {
+    startDate = new Date(argv.shift().replace(/-/g, '/'));
+  } else if (arg.match(/^(-h)|(--help)$/)) {
+    help();
+    process.exit(0);
+  } else {
+    if (!input) {
+      input = arg;
+    } else {
+      console.error(`Unknown argument passed: '${arg}'. See ${process.argv[1]} -h|--help for usage.`);
+      process.exit(1);
+    }
+  }
+}
+
+if (!input) {
+  console.error(`You must provide an input filename for this script`);
+  process.exit(5);
+}
+if (!fs.existsSync(input)) {
+  console.error(`File '${input}' doesn't exist.`);
+  process.exit(6);
+}
+
+if (dateColumn !== dateColumn) {
+  console.error(`Invalid date-column argument. Argument should be a zero-indexed integer.`);
+  process.exit(7);
+}
+if (amountColumn !== amountColumn) {
+  console.error(`Invalid amount-column argument. Argument should be a zero-indexed integer.`);
+  process.exit(8);
+}
+if (startDate && startDate.toString() === "Invalid Date") {
+  console.error(`You've passed a --start-date option that appears not to be valid.`);
+  process.exit(20);
+}
+
+let inputLines = fs.readFileSync(input, "utf8").split(/[\n\r]+/).filter(l => l.trim() !== "");
+if (inputLines.length === 0) {
+  console.error(`No lines found in file ${input}.`);
+  process.exit(10);
+}
+
+const header = inputLines.shift() + ",debit,credit";
+
+const parseCsvLine = (line) => {
+  const values = [];
+  let quoted = false;
+  let currentVal = "";
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === "," && !quoted) {
+      values.push(currentVal.trim());
+      currentVal = "";
+    } else if (line[i] === "\"" && (i === 0 || line[i-1] !== "\\")) {
+      quoted = !quoted;
+    } else {
+      currentVal += line[i];
+    }
+  }
+  return values;
+}
+
+for (let i = 0; i < inputLines.length; i++) {
+  // Skip if this is a dead line
+  if (inputLines[i].trim() === "") continue;
+
+  // Parse the current line
+  const line = parseCsvLine(inputLines[i]);
+
+  // We need to handle parentheses OR negative sign, so we're gonna take a look and see if we can
+  // just figure out whether it looks positive or negative and then create a multiplication factor
+  const factor = (line[amountColumn].match(/^\(.+\)$/) || line[amountColumn].match(/^-/)) ? -1 : 1;
+
+  // Get the raw "amount" value and multiply it by the factor determined above
+  const amount = Number(line[amountColumn].replace(/[^0-9.]+/g, "")) * factor;
+
+  // Now assign values for the debit and credit fields
+  const debit = amount < 0 ? amount/-1 : "";
+  const credit = amount > 0 ? amount : "";
+  inputLines[i] += `,${debit},${credit}`;
+}
+
+if (startDate) {
+  inputLines = inputLines.filter(l => {
+    const line = parseCsvLine(l);
+    const dateStr = line[dateColumn];
+    const date = new Date(dateStr);
+    if (!date || date.toString() === "Invalid Date") {
+      throw new Error(`Date in date column not intelligible: '${dateStr}'; Line: ${l}`);
+    }
+    return date.getTime() >= startDate.getTime();
+  });
+}
+
+inputLines.unshift(header);
+
+console.log(inputLines.join("\n"));
+
