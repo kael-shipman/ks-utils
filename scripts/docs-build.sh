@@ -8,10 +8,6 @@ if ! command -v pandoc &>/dev/null; then
 fi
 
 pkgname="$1"
-if [ -z "$pkgname" ]; then
-    >&2 echo "E: Error building docs. Package name must be supplied as first argument"
-    exit 1
-fi
 
 REPOROOT="."
 while ! [ -d "$REPOROOT/docs-src" ]; do
@@ -23,37 +19,58 @@ while ! [ -d "$REPOROOT/docs-src" ]; do
     fi
 done
 
-s="$REPOROOT/docs-src/$pkgname"
-b="$REPOROOT/docs-build/$pkgname"
-
-rm -Rf "$b" &>/dev/null || true
-mkdir -p "$b/tmp"
-
-cp -R "$s"/* "$b/tmp/"
-
-if grep -rq "::VERSION::" "$b/tmp"; then
-    VERSION="$(cat "$REPOROOT/pkg-src/generic/$pkgname/VERSION")"
-    sed -i "s/::VERSION::/$VERSION/g" $(grep -rl "::VERSION::" "$b/tmp")
-fi
-
-success=1
-while read -u8 -r -d $'\n' file || [ -n "$file" ]; do
-    if echo "$file" | grep -Eq '\.sw[op]$' || ! [ -e "$file" ]; then
-      continue;
+n=0
+for srcpkg_path in "$REPOROOT"/docs-src/*; do
+    srcpkg="$(basename "$srcpkg_path")"
+    if [ -n "$pkgname" ] && [ "$pkgname" != "$srcpkg" ]; then
+        continue
     fi
-    out="$b/${file#$b/tmp/}"
-    out="${out%.*}"
-    mkdir -p "$(dirname "$out")"
-    if ! pandoc --standalone --to man "$file" -o "$out"; then
-        success=0
-        >&2 echo "Building of docfile $file failed!"
-        break
+    n="$((n + 1))"
+
+    s="$REPOROOT/docs-src/$srcpkg"
+    b="$REPOROOT/docs-build/$srcpkg"
+
+    rm -Rf "$b" &>/dev/null || true
+    mkdir -p "$b/tmp"
+
+    cp -R "$s"/* "$b/tmp/"
+
+    if grep -rq "::VERSION::" "$b/tmp"; then
+        VERSION_FILE="$REPOROOT/pkg-src/generic/$srcpkg/VERSION"
+        if ! [ -e "$VERSION_FILE" ]; then
+            VERSION_FILE="$REPOROOT/pkg-src/generic/ks-utils/VERSION"
+        fi
+        VERSION="$(cat "$VERSION_FILE")"
+        sed -i "s/::VERSION::/$VERSION/g" $(grep -rl "::VERSION::" "$b/tmp")
     fi
-done 8< <(find "$b/tmp/" -type f)
 
-rm -Rf "$b/tmp" &>/dev/null || true
+    success=1
+    while read -u8 -r -d $'\n' file || [ -n "$file" ]; do
+        if echo "$file" | grep -Eq '\.sw[op]$' || ! [ -e "$file" ]; then
+          continue;
+        fi
+        out="$b/${file#$b/tmp/}"
+        out="${out%.*}"
+        mkdir -p "$(dirname "$out")"
+        if ! pandoc --standalone --to man "$file" -o "$out"; then
+            success=0
+            >&2 echo "Building of docfile $file failed!"
+            break
+        fi
+    done 8< <(find "$b/tmp/" -type f)
 
-if [ "$success" -eq 1 ]; then
-    echo "Docs successfully built to '$b'"
+    rm -Rf "$b/tmp" &>/dev/null || true
+
+    if [ "$success" -eq 1 ]; then
+        echo "Docs successfully built to '$b'"
+    fi
+done
+
+if [ "$n" -eq 0 ]; then
+    if [ -n "$pkgname" ]; then
+        >&2 echo "E: '$pkgname' did not match any documentation folders. Please try again."
+        exit 1
+    else
+        >&2 echo "W: No docs found to build."
+    fi
 fi
-
