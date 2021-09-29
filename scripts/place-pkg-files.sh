@@ -23,7 +23,7 @@ else
     # Build and move docs
     ./scripts/docs-build.sh
     rm -Rf ./docs-build/ks-rotate-display
-    mv ./docs-build/*/* "$man/"
+    rsync -rlu ./docs-build/*/* "$man/"
 
     sudo rsync -aHAXog --exclude ks-rotate-display src/* "$target"/
 fi

@@ -1,0 +1,83 @@
+#!/bin/bash
+
+set -e
+
+function say() {
+  if [ "$VERBOSE" == "1" ]; then
+    >&2 echo "$1"
+  fi
+  return
+}
+
+VERBOSE="$([ -n "$VERBOSE" ] && echo "$VERBOSE" || echo 0)"
+VERSION=::VERSION::
+PATH_TO_BRIGHTNESS="$([ -n "$PATH_TO_BRIGHTNESS" ] && echo "$PATH_TO_BRIGHTNESS" || echo /sys/class/backlight/intel_backlight/brightness)"
+DIRECTION=
+BRIGHTNESS=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    # Options
+    --verbose) VERBOSE=1; shift;;
+    --version) echo "ks-brightness v$VERSION"; exit;;
+    -h|--help) man ks-brightness; exit;;
+    -p|--path) PATH_TO_BRIGHTNESS="$2"; shift 2;;
+
+    # Commands
+    up|down)
+      if [ -n "$BRIGHTNESS" ]; then
+        >&2 echo "You cannot pass both a number and a direction command! It must be one or the other."
+        exit 1
+      fi
+      DIRECTION="$1"
+      shift
+      break
+    ;;
+    *)
+      if echo "$1" | grep -Eq "^[0-9]+$"; then
+        if [ -n "$DIRECTION" ]; then
+          >&2 echo "You cannot pass both a number and a direction command! It must be one or the other."
+          exit 1
+        elif [ -n "$BRIGHTNESS" ]; then
+          >&2 echo "You have passed more than one brightness value to the command! You may only pass one. Values passed: '$BRIGHTNESS', '$1'."
+          exit 3
+        fi
+        BRIGHTNESS="$1"
+        shift
+      else
+        >&2 echo "E: Unknown option '$1'"
+        exit 2
+      fi
+    ;;
+  esac
+done
+
+if [ -z "$DIRECTION" ] && [ -z "$BRIGHTNESS" ]; then
+  >&2 echo "You must pass either a direction ('up' or 'down') or a value for brightness (e.g., '4000')"
+  exit 5
+fi
+
+if ! [ -e "$PATH_TO_BRIGHTNESS" ]; then
+  >&2 echo "The path you've set to your brightness file is not valid! Please use the PATH_TO_BRIGHTNESS environment variable or the '-p|--path' parameter to set a valid path. Current path value: '$PATH_TO_BRIGHTNESS'"
+  exit 6
+fi
+
+say "Path to brightness: '$PATH_TO_BRIGHTNESS'; Direction: '$DIRECTION'; Brightness: '$BRIGHTNESS';"
+
+if [ -n "$DIRECTION" ]; then
+  CURRENT_VAL="$(cat "$PATH_TO_BRIGHTNESS")"
+  say "Direction passed; calculating new brightness value based on current value of '$CURRENT_VAL'"
+
+  if [ "$DIRECTION" == "up" ]; then
+    BRIGHTNESS="$((CURRENT_VAL + 200))"
+  else
+    BRIGHTNESS="$((CURRENT_VAL - 200))"
+  fi
+fi
+
+say "Setting to new brightness value: '$BRIGHTNESS'"
+
+echo "$BRIGHTNESS" | sudo tee "$PATH_TO_BRIGHTNESS" > /dev/null
+cat "$PATH_TO_BRIGHTNESS"
+
+say "Brightness successfully set"
+
