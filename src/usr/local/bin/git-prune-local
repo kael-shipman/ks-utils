@@ -1,0 +1,137 @@
+#!/bin/bash
+
+set -e
+
+INTERACTIVE=1
+AGGRESSIVE=0
+
+function pruneLocalNormal() {
+    local branches conf
+    local d="$1"
+
+    (
+        cd "$d"
+        git fetch --prune origin &>/dev/null
+        branches="$(git branch -v | grep -F '[gone]' | sed -r 's/^[ \t*]*([^ \t]+).*$/\1/g')"
+
+        # If we didn't find any old branches, continue
+        if [ "$(echo -n "$branches" | wc -l)" -eq 0 ] && [ "$(echo -n "$branches" | wc -c)" -eq 0 ]; then
+            return
+        fi
+
+        # Otherwise, ask about cleaning them up
+        for branch in $branches; do
+            deleteBranchWithConf "$branch"
+        done
+    )
+}
+
+function pruneLocalAggressive() {
+    local localBranches remoteBranches conf
+    local d="$1"
+
+    (
+        cd "$d"
+        localBranches="$(git branch | sed -r 's/^[ \t*]*(.*)$/\1/g')"
+        remoteBranches="$(git branch -r | sed -r 's/^[ \t*]*(.*)$/\1/g')"
+
+        for branch in $localBranches; do
+            if ! echo "$remoteBranches" | grep -Eq '^[^/]+/'$branch'$'; then
+                deleteBranchWithConf "$branch"
+            fi
+        done
+    )
+}
+
+function deleteBranchWithConf() {
+    local branch="$1" conf=y
+    if [ "$INTERACTIVE" -eq 1 ]; then
+        read -p "Found old branch '$branch'. Delete? [y,N] " conf
+    fi
+    if [ "${conf,,}" == 'y' ]; then
+        git branch -D "$branch" || true
+    else
+        echo "Skipping local branch '$branch'"
+    fi
+}
+
+function help() {
+    local nm="$(basename "$0")"
+    echo "$nm - Identify and clean out local branches whose upstream tracking branch has been deleted"
+    echo
+    echo " $nm -h|--help - show this help screen"
+    echo " $nm --version - show version info"
+    echo " $nm [OPTIONS] - run the command"
+    echo
+    echo "DESCRIPTION"
+    echo "If used from a git repo, operates on the given repo. If used from a workspace with several git repos, iterates through each child repo and operates on each one."
+    echo
+    echo "OPTIONS"
+    echo "  -a|--all|--aggressive   Aggressive mode: Instead of using git branch -v, list every local branch that doesn't have a corresponding branch in a remote"
+    echo "  -i|--interactive        Ask before deleting branches (this is the default behavior)"
+    echo "  -f|--force              Don't ask before deleting branches"
+    echo "  -o|--normal             Normal mode: The opposite of aggressive mode. (Uses git branch -v instead of doing a branch-by-branch comparison.)"
+    echo "  -q|--quiet              Alias of --force"
+    echo
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -a|--all|--aggressive)
+            AGGRESSIVE=1
+            shift
+        ;;
+
+        -h|--help)
+            help
+            exit
+        ;;
+
+        -i|--interactive)
+            INTERACTIVE=1
+            shift
+        ;;
+
+        -o|--normal)
+            AGGRESSIVE=0
+            shift
+        ;;
+
+        -q|--quiet|-f|--force)
+            INTERACTIVE=0
+            shift
+        ;;
+
+        --version)
+            echo "$(basename "$0"): ::VERSION::"
+            exit
+        ;;
+
+        *)
+            >&2 help
+            >&2 echo
+            >&2 echo "E: Unrecognized option '$1'"
+            exit 1
+        ;;
+    esac
+done
+
+if [ -d .git ]; then
+    if [ "$AGGRESSIVE" -eq 0 ]; then
+        pruneLocalNormal .
+    else
+        pruneLocalAggressive .
+    fi
+else
+    for d in *; do
+        echo "$d"
+        if [ -d "$d" ] && [ -d "$d/.git" ]; then
+            if [ "$AGGRESSIVE" -eq 0 ]; then
+                pruneLocalNormal "$d"
+            else
+                pruneLocalAggressive "$d"
+            fi
+        fi
+    done
+fi
+
